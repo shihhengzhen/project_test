@@ -1,0 +1,21 @@
+# Python 相關
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+*.egg-info/
+.pytest_cache/
+
+# 環境變數
+.env
+
+# 資料庫
+*.sqlite3
+postgres_data/
+
+# 其他
+*.log
+*.bak
+*.swp
