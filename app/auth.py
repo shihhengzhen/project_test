@@ -8,10 +8,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 SECRET_KEY = os.getenv("SECRET_KEY")
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES"))
+ACCESS_TOKEN_EXPIRE_MINUTES = os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES")
+
+if not SECRET_KEY:
+    raise ValueError("SECRET_KEY environment variable is not set")
+if not ACCESS_TOKEN_EXPIRE_MINUTES:
+    raise ValueError("ACCESS_TOKEN_EXPIRE_MINUTES environment variable is not set")
+
+ACCESS_TOKEN_EXPIRE_MINUTES = int(ACCESS_TOKEN_EXPIRE_MINUTES)
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
@@ -30,8 +37,29 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
         username: str = payload.get("sub")
         role: str = payload.get("role")
-        if username is None:
-            raise HTTPException(status_code=401, detail="Invalid token")
+        if username is None or role is None:
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "success": False,
+                    "error_code": "INVALID_TOKEN",
+                    "message": "無效的 token"
+                }
+            )
         return {"username": username, "role": role}
     except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "success": False,
+                "error_code": "INVALID_TOKEN",
+                "message": "無效的 token"
+            }
+        )
+
+# 模擬用戶資料庫
+# fake_users_db = {
+#     "admin": {"username": "admin", "password": get_password_hash("admin123"), "role": "admin"},
+#     "supplier1": {"username": "supplier1", "password": get_password_hash("supplier123"), "role": "supplier"},
+#     "user1": {"username": "user1", "password": get_password_hash("user123"), "role": "user"}
+# }
