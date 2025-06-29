@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, Query
+from fastapi import FastAPI, Depends, HTTPException, Query, APIRouter
 from sqlalchemy.orm import Session
 from database import get_db, Base, engine
 from typing import Optional, List
@@ -13,10 +13,12 @@ from crud import (
 )
 from datetime import datetime
 from pydantic import BaseModel
+from auth import jwt, create_access_token, create_refresh_token, User, SECRET_KEY, Token, verify_password, JWTError, OAuth2PasswordRequestForm, ALGORITHM
 
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
+router = APIRouter()
 
 # 統一錯誤格式
 def error_response(error_code: str, message: str):
@@ -40,22 +42,27 @@ class SupplierListResponse(BaseModel):
 
 # 產品創建
 @app.post("/product/", response_model=ProductResponse)
+@app.post("/product/", response_model=ProductResponse)
 def create_product_api(product: ProductCreate, db: Session = Depends(get_db)):
     try:
         db_product = create_product(db, product)
         return ProductResponse.model_validate(db_product)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=error_response("DATABASE_ERROR", str(e)))
-
+    
 # 批量創建
 @app.post("/product/batch_create", response_model=List[ProductResponse])
 def batch_create_product_api(request: BatchCreateRequest, db: Session = Depends(get_db)):
     try:
         result = batch_create_product(db, request)
-        return result  # 直接返回產品列表
+        return [ProductResponse.model_validate(product) for product in result]
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=error_response("DATABASE_ERROR", str(e)))
-
+    
 # 查詢單一產品
 @app.get("/product/{id}", response_model=ProductResponse)
 def read_product(id: int, db: Session = Depends(get_db)):
@@ -95,9 +102,11 @@ def list_product(
             product=[ProductResponse.model_validate(product) for product in result["product"]],
             total=result["total"]
         )
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=error_response("DATABASE_ERROR", str(e)))    
-
+        raise HTTPException(status_code=500, detail=error_response("DATABASE_ERROR", str(e)))
+    
 # 更新產品
 @app.put("/product/{id}", response_model=ProductResponse)
 def update_product_api(id: int, product: ProductUpdate, db: Session = Depends(get_db)):
@@ -145,7 +154,7 @@ def get_product_history_api(
 ):
     try:
         history = get_product_history(db, id, start_date, end_date)
-        return history  # 直接返回歷史記錄列表
+        return history 
     except Exception as e:
         raise HTTPException(status_code=500, detail=error_response("DATABASE_ERROR", str(e)))
 

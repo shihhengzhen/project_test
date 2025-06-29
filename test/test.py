@@ -1,79 +1,101 @@
 import pytest
 from fastapi.testclient import TestClient
-from main import app
-from database import SessionLocal, engine, Base
-from crud import create_product, create_supplier
-from schemas import ProductCreate, SupplierCreate
-from auth import get_password_hash
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from app.database import Base, get_db
+from app.main import app
+from app.auth import create_access_token
+from app.models import User, UserRole
+import random
+import httpx
 
-@pytest.fixture
-def client():
-    return TestClient(app)
+SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
+engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-@pytest.fixture
-def db():
-    Base.metadata.create_all(bind=engine)
-    db = SessionLocal()
+def override_get_db():
+    db = TestingSessionLocal()
     try:
         yield db
     finally:
         db.close()
-        Base.metadata.drop_all(bind=engine)
+
+app.dependency_overrides[get_db] = override_get_db
+client = TestClient(app)
+
+@pytest.fixture(scope="module")
+def setup_database():
+    Base.metadata.create_all(bind=engine)
+    yield
+    Base.metadata.drop_all(bind=engine)
 
 @pytest.fixture
-def admin_token(client):
-    response = client.post("/auth/login", json={"username": "admin", "password": "admin123", "role": "admin"})
-    return response.json()["data"]["access_token"]
+def admin_token():
+    return create_access_token({"sub": "admin_user", "role": "admin"})
 
 @pytest.fixture
-def supplier_token(client):
-    response = client.post("/auth/login", json={"username": "supplier1", "password": "supplier123", "role": "supplier"})
-    return response.json()["data"]["access_token"]
+def supplier_token():
+    return create_access_token({"sub": "supplier_user", "role": "supplier"})
 
 @pytest.fixture
-def user_token(client):
-    response = client.post("/auth/login", json={"username": "user1", "password": "user123", "role": "user"})
-    return response.json()["data"]["access_token"]
+def user_token():
+    return create_access_token({"sub": "regular_user", "role": "user"})
 
-def test_create_product_admin(client, db, admin_token):
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    product_data = {
-        "name": "Test Product",
-        "price": 100.0,
-        "stock": 50,
-        "category": "電子",
-        "discount": 10.0,
-        "description": "Test description",
-        "supplier_ids": []
-    }
-    response = client.post("/products/", json=product_data, headers=headers)
+def test_create_product_admin(setup_database, admin_token):
+    response = client.post(
+        "/product/",
+        json={
+            "name": "Test Product",
+            "price": 99.99,
+            "stock": 100,
+            "category": "Electronics",
+            "discount": 10.0,
+            "supplier_id": [1]
+        },
+        headers={"Authorization": f"Bearer {admin_token}"}
+    )
     assert response.status_code == 200
-    assert response.json()["success"] == True
-    assert response.json()["data"]["name"] == "Test Product"
+    assert response.json()["name"] == "Test Product"
 
-def test_create_product_supplier_forbidden(client, supplier_token):
-    headers = {"Authorization": f"Bearer {supplier_token}"}
-    product_data = {
-        "name": "Test Product",
-        "price": 100.0,
-        "stock": 50
-    }
-    response = client.post("/products/", json=product_data, headers=headers)
+def test_create_product_unauthorized(user_token):
+    response = client.post(
+        "/product/",
+        json={
+            "name": "Test Product",
+            "price": 99.99,
+            "stock": 100
+        },
+        headers={"Authorization": f"Bearer {user_token}"}
+    )
     assert response.status_code == 403
-    assert response.json()["success"] == False
-    assert response.json()["error_code"] == "FORBIDDEN"
+    assert response.json()["error_code"] == "PERMISSION_DENIED"
 
-def test_get_product_not_found(client, db, admin_token):
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    response = client.get("/products/999", headers=headers)
-    assert response.status_code == 404
-    assert response.json()["success"] == False
-    assert response.json()["error_code"] == "PRODUCT_NOT_FOUND"
+def test_get_product_list(setup_database, user_token):
+    response = client.get("/product/", headers={"Authorization": f"Bearer {user_token}"})
+    assert response.status_code == 200
+    assert "product" in response.json()
+    assert "total" in response.json()
 
-def test_get_product_history_user_forbidden(client, db, user_token):
-    headers = {"Authorization": f"Bearer {user_token}"}
-    product = create_product(db, ProductCreate(name="Test Product", price=100.0, stock=50), "admin")
-    response = client.get(f"/products/{product.id}/history", headers=headers)
-    assert response.status_code == 403
-    assert response.json()["success"] == False
-    assert response.json()["error_code"] == "FORBIDDEN"
+def test_concurrent_product_create(setup_database, admin_token):
+    import asyncio
+    async def create_product():
+        async with httpx.AsyncClient(app=app, base_url="http://test") as async_client:
+            response = await async_client.post(
+                "/product/",
+                json={
+                    "name": f"Test Product {random.randint(1, 1000)}",
+                    "price": 99.99,
+                    "stock": 100,
+                    "category": "Electronics"
+                },
+                headers={"Authorization": f"Bearer {admin_token}"}
+            )
+            return response.status_code
+    tasks = [create_product() for _ in range(50)]
+    results = asyncio.run(asyncio.gather(*tasks))
+    assert all(status == 200 for status in results)
+
+def test_coverage():
+    # 執行 pytest-cov
+    # 在終端機執行: pytest --cov=. --cov-report=html
+    pass

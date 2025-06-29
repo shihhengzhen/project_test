@@ -1,9 +1,24 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Table
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Table, Enum
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
+import enum
+
 #ALTER TABLE product DROP COLUMN supplier_id;
 # 產品供應商多對多
+
+class UserRole(enum.Enum):
+    admin = "admin"
+    supplier = "supplier"
+    user = "user"
+
+class User(Base):
+    __tablename__ = "user"
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(50), unique=True, nullable=False, index=True)
+    hashed_password = Column(String, nullable=False)
+    role = Column(Enum(UserRole), nullable=False, default=UserRole.user)
+
 product_supplier = Table(
     "product_supplier",
     Base.metadata,
@@ -39,6 +54,7 @@ class History(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     product_id = Column(Integer, ForeignKey("product.id"), nullable=False, index=True)
+    #name = Column(str, nullable=False)
     field = Column(String(50), nullable=False) 
     old_value = Column(Float, nullable=True)  
     new_value = Column(Float, nullable=True)

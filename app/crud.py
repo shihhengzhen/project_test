@@ -16,10 +16,10 @@ def create_product(db: Session, product: ProductCreate):
         db_product = Product(**product.model_dump(exclude={"supplier_id"}))
         if product.supplier_id:
             if not isinstance(product.supplier_id, list):
-                raise HTTPException(status_code=400, detail=error_response("INVALID_SUPPLIER_ID", "supplier_id 必須是整數列表"))
+                raise HTTPException(status_code=400, detail=error_response("INVALID_SUPPLIER_ID", "supplier_id必須在列表中"))
             supplier = db.query(Supplier).filter(Supplier.id.in_(product.supplier_id)).all()
             if len(supplier) != len(product.supplier_id):
-                raise HTTPException(status_code=400, detail=error_response("INVALID_SUPPLIER_ID", "部分供應商 ID 無效"))
+                raise HTTPException(status_code=400, detail=error_response("INVALID_SUPPLIER_ID", "部分供應商ID錯誤"))
             db_product.supplier = supplier
         db.add(db_product)
         db.commit()
@@ -70,7 +70,8 @@ def get_product_list(db: Session, filters: ProductFilter):
         product = query.offset(filters.offset).limit(filters.limit).all()
         return {"product": product, "total": total}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=error_response("DATABASE_ERROR", str(e)))    
+        raise HTTPException(status_code=500, detail=error_response("DATABASE_ERROR", str(e))) 
+       
 # 更新產品
 def update_product(db: Session, product_id: int, product: ProductUpdate):
     try:
@@ -82,6 +83,7 @@ def update_product(db: Session, product_id: int, product: ProductUpdate):
             if field in update_data and getattr(db_product, field) != update_data[field]:
                 history_entry = History(
                     product_id=product_id,
+                    #name = str(getattr(db_product, name)),
                     field=field,
                     old_value=float(getattr(db_product, field)),
                     new_value=float(update_data[field]),
@@ -111,7 +113,7 @@ def update_product(db: Session, product_id: int, product: ProductUpdate):
               
 # 批量更新
 def batch_update_product(db: Session, request: BatchUpdateRequest):
-    updated_product = []
+    updated_products = []
     try:
         for product_data in request.product:
             product_id = getattr(product_data, "id", None)
@@ -119,10 +121,10 @@ def batch_update_product(db: Session, request: BatchUpdateRequest):
                 raise HTTPException(status_code=400, detail=error_response("INVALID_REQUEST", "批量更新請求中缺少產品 ID"))
             updated_product = update_product(db, product_id, product_data)
             if updated_product:
-                updated_product.append(updated_product)
+                updated_products.append(updated_product)
             else:
                 raise HTTPException(status_code=404, detail=error_response("PRODUCT_NOT_FOUND", f"產品 ID {product_id} 不存在"))
-        return updated_product
+        return updated_products
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=error_response("DATABASE_ERROR", str(e)))
@@ -155,16 +157,26 @@ def batch_delete_product(db: Session, request: BatchDeleteRequest):
 #歷史紀錄
 def get_product_history(db: Session, product_id: int, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None):
     try:
-        query = db.query(History).filter(History.product_id == product_id)
+        query = db.query(History, Product.name).join(Product, History.product_id == Product.id).filter(History.product_id == product_id)
         if start_date:
             query = query.filter(History.timestamp >= start_date)
         if end_date:
             query = query.filter(History.timestamp <= end_date)
         history = query.order_by(History.timestamp.desc()).all()
-        return history
+        return [
+            {
+                "product_id": h.product_id,
+                "product_name": name,
+                "field": h.field,
+                "old_value": h.old_value,
+                "new_value": h.new_value,
+                #"changed_by": h.changed_by,
+                "timestamp": h.timestamp
+            } for h, name in history
+        ]
     except Exception as e:
         raise HTTPException(status_code=500, detail=error_response("DATABASE_ERROR", str(e)))
-
+    
 # 供應商新增
 def create_supplier(db: Session, supplier: SupplierCreate):
     try:

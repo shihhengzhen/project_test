@@ -118,10 +118,17 @@ class ProductResponse(BaseModel):
     created_at: datetime
     #supplier_id: Optional[int] = None
     #supplier: Optional[List[SupplierShort]] = None
+    supplier_id: Optional[List[int]] = None
     model_config = {
         "from_attributes": True,
     }
-
+    #這樣就有供應商id了
+    @classmethod
+    def model_validate(cls, obj):
+        data = super().model_validate(obj).__dict__
+        data["supplier_id"] = [s.id for s in obj.supplier] if obj.supplier else []
+        return cls(**data)
+    
 class BatchCreateRequest(BaseModel):
     product: List[ProductCreate] = Field(..., min_items=1, description="要創建的產品列表")
 
@@ -146,7 +153,9 @@ class ProductFilter(BaseModel):
     
 # 歷史記錄
 class HistoryResponse(BaseModel):
-    id: int
+    #id: int
+    #name = str
+    product_name: str
     product_id: int
     field: str
     old_value: Optional[float] = None
