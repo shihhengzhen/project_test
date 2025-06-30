@@ -1,19 +1,21 @@
-from fastapi import HTTPException, Security
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi import HTTPException, Security, Depends
+from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
-from typing import Optional
 from pydantic import BaseModel
-from crud import error_response
-from models import User
 from sqlalchemy.orm import Session
-from fastapi import Depends
 from database import get_db
+from models import User, UserRole
+import os
+from dotenv import load_dotenv
+from typing import Optional
 
-SECRET_KEY = "your-secret-key"  # 請使用環境變數儲存
+load_dotenv()
+
+SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = 60
 REFRESH_TOKEN_EXPIRE_DAYS = 7
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -36,17 +38,14 @@ def get_password_hash(password):
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.now(datetime.timezone.utc) + expires_delta
-    else:
-        expire = datetime.now(datetime.timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    expire = datetime.now(datetime.timezone.utc) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
 def create_refresh_token(data: dict):
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    expire = datetime.now(datetime.timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
@@ -54,7 +53,7 @@ def create_refresh_token(data: dict):
 async def get_current_user(token: str = Security(oauth2_scheme), db: Session = Depends(get_db)):
     credentials_exception = HTTPException(
         status_code=401,
-        detail=error_response("INVALID_CREDENTIALS", "無效的認證憑證"),
+        detail={"success": False, "error_code": "INVALID_CREDENTIALS", "message": "無效的認證憑證"},
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
@@ -70,3 +69,19 @@ async def get_current_user(token: str = Security(oauth2_scheme), db: Session = D
     if user is None:
         raise credentials_exception
     return user
+
+async def refresh_access_token(refresh_token: str, db: Session = Depends(get_db)):
+    try:
+        payload = jwt.decode(refresh_token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        role: str = payload.get("role")
+        if username is None or role is None:
+            raise HTTPException(status_code=401, detail={"success": False, "error_code": "INVALID_TOKEN", "message": "無效的 Refresh Token"})
+        user = db.query(User).filter(User.username == username).first()
+        if user is None:
+            raise HTTPException(status_code=401, detail={"success": False, "error_code": "USER_NOT_FOUND", "message": "使用者不存在"})
+        access_token = create_access_token(data={"sub": user.username, "role": user.role.value})
+        new_refresh_token = create_refresh_token(data={"sub": user.username, "role": user.role.value})
+        return {"access_token": access_token, "refresh_token": new_refresh_token, "token_type": "bearer"}
+    except JWTError:
+        raise HTTPException(status_code=401, detail={"success": False, "error_code": "INVALID_TOKEN", "message": "無效的 Refresh Token"})

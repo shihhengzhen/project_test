@@ -33,6 +33,7 @@ class SupplierUpdate(SupplierBase):
     rating: Optional[float] = Field(None, ge=0, le=5, description="供應商評分，0-5分")
 
 class SupplierResponse(SupplierBase):
+    id: int
     name: str
     contact: Optional[str] = None
     rating: Optional[float] = None
@@ -81,13 +82,6 @@ class ProductBase(BaseModel):
         return value
     
 class ProductCreate(ProductBase):
-    pass
-    # name: str
-    # price: float
-    # description: Optional[str] = None
-    # stock: int
-    # category: Optional[str] = None
-    # discount: float = 0
     supplier_id: Optional[List[int]] = None
     # class Config:
     #     from_attributes = True
@@ -115,10 +109,8 @@ class ProductResponse(BaseModel):
     discount: Optional[float] = None
     created_at: datetime
     updated_at: Optional[datetime] = None 
-    created_at: datetime
-    #supplier_id: Optional[int] = None
-    #supplier: Optional[List[SupplierShort]] = None
-    supplier_id: Optional[List[int]] = None
+    #supplier_id: Optional[List[int]] = None
+    supplier: Optional[List[SupplierShort]] = None
     model_config = {
         "from_attributes": True,
     }

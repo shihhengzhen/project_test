@@ -1,7 +1,6 @@
 import streamlit as st
 import requests
 import pandas as pd
-from datetime import datetime
 import time
 
 # 基礎配置
@@ -13,9 +12,98 @@ def handle_response(response):
     if response.status_code in [200, 201]:
         return response.json()
     else:
-        st.error(f"操作失敗：{response.json().get('message', '未知錯誤')}")
+        try:
+            error_data = response.json()
+            st.error(f"操作失敗：{error_data.get('detail', error_data.get('message', '未知錯誤'))} (錯誤碼：{error_data.get('error_code', '未知')})")
+        except ValueError:
+            st.error(f"操作失敗：伺服器回應錯誤 (狀態碼：{response.status_code})")
         return None
 
+# 獲取 JWT token 的頭部
+def get_auth_headers():
+    if "access_token" not in st.session_state:
+        st.error("請先登入！")
+        st.stop()
+    return {"Authorization": f"Bearer {st.session_state.access_token}"}
+
+# 檢查並刷新 token
+def refresh_token_if_needed():
+    if "refresh_token" not in st.session_state:
+        st.error("請重新登入！")
+        st.session_state.clear()
+        st.rerun()
+    try:
+        response = requests.post(f"{BASE_URL}/refresh", json={"refresh_token": st.session_state.refresh_token})
+        data = handle_response(response)
+        if data:
+            st.session_state.access_token = data["access_token"]
+            st.session_state.refresh_token = data["refresh_token"]
+            return True
+        else:
+            st.error("無法刷新 token，請重新登入！")
+            st.session_state.clear()
+            st.rerun()
+    except Exception as e:
+        st.error(f"刷新 token 失敗：{str(e)}")
+        st.session_state.clear()
+        st.rerun()
+    return False
+
+# 檢查 API 請求是否需要重試（token 過期）
+def make_api_request(method, url, **kwargs):
+    try:
+        headers = kwargs.get("headers", {})
+        headers.update(get_auth_headers())
+        kwargs["headers"] = headers
+        response = getattr(requests, method)(url, **kwargs)
+        if response.status_code == 401 and response.json().get("error_code") == "INVALID_CREDENTIALS":
+            if refresh_token_if_needed():
+                headers.update(get_auth_headers())
+                kwargs["headers"] = headers
+                response = getattr(requests, method)(url, **kwargs)
+        return response
+    except Exception as e:
+        st.error(f"API 請求失敗：{str(e)}")
+        return None
+
+# 登入頁面
+def login_page():
+    st.title("登入")
+    # Use more specific keys to avoid conflicts
+    username = st.text_input("用戶名", key="login_page_username_input")
+    password = st.text_input("密碼", type="password", key="login_page_password_input")
+    submit_button = st.button("登入", key="login_page_submit_button")
+
+    if submit_button:
+        with st.spinner("正在登入..."):
+            response = requests.post(
+                f"{BASE_URL}/login",
+                data={"username": username, "password": password},
+                headers={"Content-Type": "application/x-www-form-urlencoded"}
+            )
+            print(f"Response status: {response.status_code}, Response text: {response.text}")
+            if response.status_code == 200:
+                data = response.json()
+                st.session_state.access_token = data["access_token"]
+                st.session_state.refresh_token = data.get("refresh_token")
+                st.session_state.role = requests.get(
+                    f"{BASE_URL}/current_user",
+                    headers={"Authorization": f"Bearer {data['access_token']}"}
+                ).json().get("role")
+                st.success("登入成功！")
+                st.rerun()
+            else:
+                try:
+                    error_data = response.json()
+                    st.error(f"登入失敗：{error_data.get('detail', '未知錯誤')}")
+                except ValueError:
+                    st.error(f"登入失敗：伺服器回應錯誤 (狀態碼：{response.status_code})")
+if __name__ == "__main__":
+    if "access_token" not in st.session_state:
+        login_page()
+    else:
+        st.write(f"已登入，角色: {st.session_state.role}")
+        
 # 產品篩選頁
 def product_filter_page():
     st.title("📋 產品篩選")
@@ -47,7 +135,7 @@ def product_filter_page():
                         "offset": offset,
                         "order_by": order_by if order_by else None
                     }
-                    response = requests.get(f"{BASE_URL}/product/", params=params)
+                    response = make_api_request("get", f"{BASE_URL}/product/", params=params)
                     data = handle_response(response)
                     if data:
                         st.session_state.products = data["product"]
@@ -78,6 +166,10 @@ def product_filter_page():
 
 # 產品管理頁
 def product_management_page():
+    if st.session_state.role not in ["admin", "supplier"]:
+        st.error("僅管理員或供應商可以訪問此頁面！")
+        st.stop()
+    
     st.title("🛠 產品管理")
     st.markdown("新增、編輯或刪除產品")
     with st.container():
@@ -85,6 +177,9 @@ def product_management_page():
         action = st.selectbox("選擇操作", ["新增產品", "編輯產品", "刪除產品"], help="選擇要執行的操作")
         
         if action == "新增產品":
+            if st.session_state.role != "admin":
+                st.error("僅管理員可以新增產品！")
+                st.stop()
             with st.form(key="product_create_form"):
                 name = st.text_input("名稱", max_chars=100, placeholder="輸入產品名稱", help="名稱需 3-100 字元")
                 price = st.number_input("價格", min_value=0.01, step=0.01, format="%.2f", help="輸入產品價格")
@@ -92,8 +187,8 @@ def product_management_page():
                 category = st.text_input("分類", placeholder="輸入分類名稱", help="可選的分類名稱")
                 discount = st.number_input("折扣（%）", min_value=0.0, max_value=100.0, step=0.1, format="%.1f", help="輸入折扣百分比")
                 description = st.text_area("描述", placeholder="輸入產品描述", help="可選的產品描述")
-                response = requests.get(f"{BASE_URL}/supplier/")
-                suppliers = handle_response(response)["supplier"] if response.status_code == 200 else []
+                response = make_api_request("get", f"{BASE_URL}/supplier/")
+                suppliers = handle_response(response)["supplier"] if response else []
                 supplier_ids = st.multiselect(
                     "供應商",
                     options=[s["id"] for s in suppliers],
@@ -112,7 +207,7 @@ def product_management_page():
                             "description": description if description else None,
                             "supplier_id": supplier_ids
                         }
-                        response = requests.post(f"{BASE_URL}/product/", json=data)
+                        response = make_api_request("post", f"{BASE_URL}/product/", json=data)
                         if handle_response(response):
                             st.success("新增成功！")
                             time.sleep(1)
@@ -127,8 +222,8 @@ def product_management_page():
                 category = st.text_input("分類", placeholder="輸入分類名稱", help="可選的分類名稱")
                 discount = st.number_input("折扣（%）", min_value=0.0, max_value=100.0, step=0.1, format="%.1f", help="輸入折扣百分比")
                 description = st.text_area("描述", placeholder="輸入產品描述", help="可選的產品描述")
-                response = requests.get(f"{BASE_URL}/supplier/")
-                suppliers = handle_response(response)["supplier"] if response.status_code == 200 else []
+                response = make_api_request("get", f"{BASE_URL}/supplier/")
+                suppliers = handle_response(response)["supplier"] if response else []
                 supplier_ids = st.multiselect(
                     "供應商",
                     options=[s["id"] for s in suppliers],
@@ -147,7 +242,7 @@ def product_management_page():
                             "description": description if description else None,
                             "supplier_id": supplier_ids
                         }
-                        response = requests.put(f"{BASE_URL}/product/{product_id}", json=data)
+                        response = make_api_request("put", f"{BASE_URL}/product/{product_id}", json=data)
                         if handle_response(response):
                             st.success("更新成功！")
                             time.sleep(1)
@@ -160,7 +255,7 @@ def product_management_page():
                     submit_button = st.form_submit_button("刪除")
                     if submit_button:
                         with st.spinner("正在刪除..."):
-                            response = requests.delete(f"{BASE_URL}/product/{product_id}")
+                            response = make_api_request("delete", f"{BASE_URL}/product/{product_id}")
                             if handle_response(response):
                                 st.success("刪除成功！")
                                 time.sleep(1)
@@ -168,12 +263,16 @@ def product_management_page():
 
 # 供應商管理頁
 def supplier_management_page():
+    if st.session_state.role != "admin":
+        st.error("僅管理員可以訪問此頁面！")
+        st.stop()
+    
     st.title("🏢 供應商管理")
     st.markdown("管理供應商資訊")
     with st.container():
         st.subheader("供應商列表")
-        response = requests.get(f"{BASE_URL}/supplier/")
-        suppliers = handle_response(response)["supplier"] if response.status_code == 200 else []
+        response = make_api_request("get", f"{BASE_URL}/supplier/")
+        suppliers = handle_response(response)["supplier"] if response else []
         if suppliers:
             df = pd.DataFrame([
                 {
@@ -193,7 +292,7 @@ def supplier_management_page():
             supplier_id = st.number_input("供應商 ID", min_value=1, step=1, help="輸入要查看的供應商 ID")
             if st.button("查詢", use_container_width=True):
                 with st.spinner("正在查詢..."):
-                    response = requests.get(f"{BASE_URL}/supplier/{supplier_id}")
+                    response = make_api_request("get", f"{BASE_URL}/supplier/{supplier_id}")
                     supplier = handle_response(response)
                     if supplier:
                         st.subheader("供應商詳情")
@@ -216,9 +315,9 @@ def supplier_management_page():
                             "contact": contact if contact else None,
                             "rating": rating if rating > 0 else None
                         }
-                        response = requests.post(f"{BASE_URL}/supplier/", json=data)
+                        response = make_api_request("post", f"{BASE_URL}/supplier/", json=data)
                         if handle_response(response):
-                            st.success("新增成功！")
+                            st.success(f"新增成功！自動生成用戶帳號：supplier_{response.json()['id']}_{name.lower().replace(' ', '_')}")
                             time.sleep(1)
                             st.rerun()
         
@@ -236,7 +335,7 @@ def supplier_management_page():
                             "contact": contact if contact else None,
                             "rating": rating if rating > 0 else None
                         }
-                        response = requests.put(f"{BASE_URL}/supplier/{supplier_id}", json=data)
+                        response = make_api_request("put", f"{BASE_URL}/supplier/{supplier_id}", json=data)
                         if handle_response(response):
                             st.success("更新成功！")
                             time.sleep(1)
@@ -249,7 +348,7 @@ def supplier_management_page():
                     submit_button = st.form_submit_button("刪除")
                     if submit_button:
                         with st.spinner("正在刪除..."):
-                            response = requests.delete(f"{BASE_URL}/supplier/{supplier_id}")
+                            response = make_api_request("delete", f"{BASE_URL}/supplier/{supplier_id}")
                             if handle_response(response):
                                 st.success("刪除成功！")
                                 time.sleep(1)
@@ -257,6 +356,10 @@ def supplier_management_page():
 
 # 歷史記錄頁
 def history_page():
+    if st.session_state.role not in ["admin", "supplier"]:
+        st.error("僅管理員或供應商可以訪問此頁面！")
+        st.stop()
+    
     st.title("📜 產品歷史記錄")
     st.markdown("查詢產品的價格和庫存變動歷史")
     with st.container():
@@ -272,7 +375,7 @@ def history_page():
                         "start_date": start_date.isoformat() if start_date else None,
                         "end_date": end_date.isoformat() if end_date else None
                     }
-                    response = requests.get(f"{BASE_URL}/product/{product_id}/history", params=params)
+                    response = make_api_request("get", f"{BASE_URL}/product/{product_id}/history", params=params)
                     history = handle_response(response)
                     if history:
                         st.session_state.history = history
@@ -308,6 +411,10 @@ def history_page():
 
 # 批量操作頁
 def batch_operation_page():
+    if st.session_state.role != "admin":
+        st.error("僅管理員可以訪問此頁面！")
+        st.stop()
+    
     st.title("🔄 批量操作")
     st.markdown("批量管理多個產品")
     with st.container():
@@ -317,7 +424,7 @@ def batch_operation_page():
         if action == "批量新增":
             with st.form(key="batch_create_form"):
                 st.write("輸入多個產品資料（每行一個產品，格式：名稱,價格,庫存,分類,折扣,描述,供應商ID）")
-                batch_data = st.text_area("產品資料", placeholder="例：產品A,100.0,50,Electronics,10.0,描述,[1,2]", height=200)
+                batch_data = st.text_area("產品資料", placeholder="例：產品A,100.0,50,Electronics,10.0,描述,[1;2]", height=200)
                 submit_button = st.form_submit_button("提交")
                 if submit_button:
                     with st.spinner("正在批量新增..."):
@@ -338,7 +445,7 @@ def batch_operation_page():
                                 except ValueError:
                                     st.error(f"格式錯誤：{line}")
                                     return
-                        response = requests.post(f"{BASE_URL}/product/batch_create", json={"product": products})
+                        response = make_api_request("post", f"{BASE_URL}/product/batch_create", json={"product": products})
                         if handle_response(response):
                             st.success("批量新增成功！")
                             time.sleep(1)
@@ -346,8 +453,8 @@ def batch_operation_page():
         
         elif action == "批量刪除":
             with st.form(key="batch_delete_form"):
-                response = requests.get(f"{BASE_URL}/product/")
-                products = handle_response(response)["product"] if response.status_code == 200 else []
+                response = make_api_request("get", f"{BASE_URL}/product/")
+                products = handle_response(response)["product"] if response else []
                 selected_ids = st.multiselect(
                     "選擇要刪除的產品",
                     options=[p["id"] for p in products],
@@ -358,24 +465,38 @@ def batch_operation_page():
                     submit_button = st.form_submit_button("刪除")
                     if submit_button:
                         with st.spinner("正在批量刪除..."):
-                            response = requests.delete(f"{BASE_URL}/product/batch_delete", json={"ids": selected_ids})
+                            response = make_api_request("delete", f"{BASE_URL}/product/batch_delete", json={"ids": selected_ids})
                             if handle_response(response):
                                 st.success("批量刪除成功！")
                                 time.sleep(1)
                                 st.rerun()
 
 # 主邏輯
-with st.sidebar:
-    st.title("🛒 產品管理系統")
-    page = st.selectbox("選擇頁面", ["產品篩選", "產品管理", "供應商管理", "歷史記錄", "批量操作"], help="選擇要操作的功能")
+if "access_token" not in st.session_state:
+    login_page()
+else:
+    with st.sidebar:
+        st.title("🛒 產品管理系統")
+        st.write(f"當前角色：{st.session_state.role}")
+        if st.button("登出"):
+            st.session_state.clear()
+            st.rerun()
+        
+        # 根據角色顯示可用的頁面
+        pages = ["產品篩選"]
+        if st.session_state.role in ["admin", "supplier"]:
+            pages.extend(["產品管理", "歷史記錄"])
+        if st.session_state.role == "admin":
+            pages.extend(["供應商管理", "批量操作"])
+        page = st.selectbox("選擇頁面", pages, help="選擇要操作的功能")
 
-if page == "產品篩選":
-    product_filter_page()
-elif page == "產品管理":
-    product_management_page()
-elif page == "供應商管理":
-    supplier_management_page()
-elif page == "歷史記錄":
-    history_page()
-elif page == "批量操作":
-    batch_operation_page()
+    if page == "產品篩選":
+        product_filter_page()
+    elif page == "產品管理":
+        product_management_page()
+    elif page == "供應商管理":
+        supplier_management_page()
+    elif page == "歷史記錄":
+        history_page()
+    elif page == "批量操作":
+        batch_operation_page()

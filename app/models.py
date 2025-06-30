@@ -4,9 +4,7 @@ from sqlalchemy.sql import func
 from database import Base
 import enum
 
-#ALTER TABLE product DROP COLUMN supplier_id;
 # 產品供應商多對多
-
 class UserRole(enum.Enum):
     admin = "admin"
     supplier = "supplier"
@@ -58,6 +56,6 @@ class History(Base):
     field = Column(String(50), nullable=False) 
     old_value = Column(Float, nullable=True)  
     new_value = Column(Float, nullable=True)
-    #changed_by = Column(String(100), nullable=False)  
+    changed_by = Column(String(100), nullable=False)  
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
     product = relationship("Product", back_populates="history")
