@@ -2,27 +2,24 @@ from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
-#格式
-#簡要
+
+# 簡要模型
 class ProductShort(BaseModel):
     id: int
     name: str
-    class Config:
-        from_attributes = True
-        
+    model_config = {"from_attributes": True}
+
 class SupplierShort(BaseModel):
     id: int
     name: str
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 # 供應商
 class SupplierBase(BaseModel):
     name: str = Field(..., min_length=3, max_length=100)
     contact: Optional[str] = None
     rating: Optional[float] = Field(None, ge=0, le=5, description="供應商評分，0-5分")
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 class SupplierCreate(SupplierBase):
     pass
@@ -30,19 +27,12 @@ class SupplierCreate(SupplierBase):
 class SupplierUpdate(SupplierBase):
     name: Optional[str] = Field(None, min_length=3, max_length=100)
     contact: Optional[str] = None
-    rating: Optional[float] = Field(None, ge=0, le=5, description="供應商評分，0-5分")
+    rating: Optional[float] = Field(None, ge=0, le=5)
 
 class SupplierResponse(SupplierBase):
     id: int
-    name: str
-    contact: Optional[str] = None
-    rating: Optional[float] = None
     product: Optional[List[ProductShort]] = None
 
-    model_config = {
-        "from_attributes": True,
-    }
- 
 # 產品
 class ProductBase(BaseModel):
     name: str = Field(..., min_length=3, max_length=100)
@@ -52,10 +42,7 @@ class ProductBase(BaseModel):
     category: Optional[str] = None
     discount: float = Field(0, ge=0, le=100)
     supplier_id: Optional[List[int]] = None
-
-    model_config = {
-        "from_attributes": True,
-    }
+    model_config = {"from_attributes": True}
 
     @field_validator("price")
     def validate_price_precision(cls, value):
@@ -80,23 +67,17 @@ class ProductBase(BaseModel):
         if not isinstance(value, list) or not all(isinstance(x, int) for x in value):
             raise ValueError("supplier_id 必須是整數列表")
         return value
-    
+
 class ProductCreate(ProductBase):
     supplier_id: Optional[List[int]] = None
-    # class Config:
-    #     from_attributes = True
 
 class ProductUpdate(ProductBase):
-    model_config = {
-        "from_attributes": True,  
-    }
-    #id: Optional[int] = None  
     name: Optional[str] = Field(None, min_length=3, max_length=100)
-    price: Optional[float] = Field(None)
+    price: Optional[float] = None
     description: Optional[str] = None
-    stock: Optional[int] = Field(None)
+    stock: Optional[int] = None
     category: Optional[str] = None
-    discount: Optional[float] = Field(None)
+    discount: Optional[float] = None
     supplier_id: Optional[List[int]] = None
 
 class ProductResponse(BaseModel):
@@ -108,19 +89,17 @@ class ProductResponse(BaseModel):
     category: Optional[str] = None
     discount: Optional[float] = None
     created_at: datetime
-    updated_at: Optional[datetime] = None 
-    #supplier_id: Optional[List[int]] = None
+    updated_at: Optional[datetime] = None
+    supplier_id: Optional[List[int]] = None
     supplier: Optional[List[SupplierShort]] = None
-    model_config = {
-        "from_attributes": True,
-    }
-    #這樣就有供應商id了
+    model_config = {"from_attributes": True}
+
     @classmethod
     def model_validate(cls, obj):
         data = super().model_validate(obj).__dict__
         data["supplier_id"] = [s.id for s in obj.supplier] if obj.supplier else []
         return cls(**data)
-    
+
 class BatchCreateRequest(BaseModel):
     product: List[ProductCreate] = Field(..., min_items=1, description="要創建的產品列表")
 
@@ -129,7 +108,7 @@ class BatchUpdateRequest(BaseModel):
 
 class BatchDeleteRequest(BaseModel):
     ids: List[int] = Field(..., min_items=1, description="要刪除的產品ID")
-    
+
 # 產品篩選
 class ProductFilter(BaseModel):
     min_price: Optional[float] = None
@@ -142,26 +121,25 @@ class ProductFilter(BaseModel):
     limit: int = 10
     offset: int = Field(0, ge=0)
     order_by: Optional[str] = None
-    
+
 # 歷史記錄
 class HistoryResponse(BaseModel):
-    #id: int
-    #name = str
-    product_name: str
     product_id: int
+    product_name: str
     field: str
     old_value: Optional[float] = None
     new_value: Optional[float] = None
-    #changed_by: str
+    changed_by: str
     timestamp: datetime
-    
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
+# 清單回應
 class ProductListResponse(BaseModel):
+    success: bool = True
     product: List[ProductResponse]
     total: int
 
-    model_config = {
-        "from_attributes": True,
-    }
+class SupplierListResponse(BaseModel):
+    success: bool = True
+    supplier: List[SupplierResponse]
+    total: int

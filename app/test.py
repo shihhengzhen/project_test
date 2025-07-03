@@ -6,22 +6,13 @@ from sqlalchemy.sql import text
 
 def create_test_data(db: Session):
     try:
-        print("Starting to create test data...")
-
-        # 創建所有表
         Base.metadata.create_all(bind=engine)
-        print("Database tables created.")
-
-        # 清空現有數據（按依賴順序刪除）
-        db.query(History).delete()          # 先刪除 history 表
-        db.query(product_supplier).delete() # 再刪除關聯表
-        db.query(Product).delete()          # 再刪除產品
-        db.query(Supplier).delete()         # 再刪除供應商
-        db.query(User).delete()             # 最後刪除用戶
+        db.query(History).delete()         
+        db.query(product_supplier).delete() 
+        db.query(Product).delete()          
+        db.query(Supplier).delete()        
+        db.query(User).delete()            
         db.commit()
-        print("Existing data cleared.")
-
-        # 插入測試用戶
         users = [
             {"username": "admin", "password": "123", "role": UserRole.admin},
             {"username": "supplier1", "password": "123", "role": UserRole.supplier},
@@ -37,9 +28,6 @@ def create_test_data(db: Session):
                 )
                 db.add(db_user)
         db.commit()
-        print("Test users inserted.")
-
-        # 插入測試供應商
         supplier = db.query(Supplier).filter(Supplier.id == 1).first()
         if not supplier:
             supplier = Supplier(
@@ -50,9 +38,6 @@ def create_test_data(db: Session):
             )
             db.add(supplier)
         db.commit()
-        print("Test supplier inserted.")
-
-        # 插入測試產品
         product = db.query(Product).filter(Product.id == 1).first()
         if not product:
             product = Product(
@@ -65,17 +50,13 @@ def create_test_data(db: Session):
             )
             db.add(product)
         db.commit()
-        print("Test product inserted.")
-
-        # 建立產品與供應商的關聯
         db.execute(
             text("INSERT INTO product_supplier (product_id, supplier_id) VALUES (:product_id, :supplier_id) ON CONFLICT DO NOTHING"),
             {"product_id": 1, "supplier_id": 1}
         )
         db.commit()
-        print("Product-supplier association created.")
 
-        print("Test data (users, supplier, product) created successfully!")
+        print("測試資料加入成功")
     except Exception as e:
         db.rollback()
         print(f"Error occurred: {str(e)}")

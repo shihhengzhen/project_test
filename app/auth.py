@@ -2,11 +2,11 @@ from fastapi import HTTPException, Security, Depends
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from database import get_db
-from models import User, UserRole
+from models import User
 import os
 from dotenv import load_dotenv
 from typing import Optional
@@ -38,17 +38,15 @@ def get_password_hash(password):
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
-    expire = datetime.now(datetime.timezone.utc) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 def create_refresh_token(data: dict):
     to_encode = data.copy()
-    expire = datetime.now(datetime.timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    expire = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 async def get_current_user(token: str = Security(oauth2_scheme), db: Session = Depends(get_db)):
     credentials_exception = HTTPException(
@@ -80,8 +78,8 @@ async def refresh_access_token(refresh_token: str, db: Session = Depends(get_db)
         user = db.query(User).filter(User.username == username).first()
         if user is None:
             raise HTTPException(status_code=401, detail={"success": False, "error_code": "USER_NOT_FOUND", "message": "使用者不存在"})
-        access_token = create_access_token(data={"sub": user.username, "role": user.role.value})
-        new_refresh_token = create_refresh_token(data={"sub": user.username, "role": user.role.value})
+        access_token = create_access_token(data={"sub": user.username, "role": user.role})
+        new_refresh_token = create_refresh_token(data={"sub": user.username, "role": user.role})
         return {"access_token": access_token, "refresh_token": new_refresh_token, "token_type": "bearer"}
     except JWTError:
         raise HTTPException(status_code=401, detail={"success": False, "error_code": "INVALID_TOKEN", "message": "無效的 Refresh Token"})
