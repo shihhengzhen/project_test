@@ -189,7 +189,7 @@ async def test_high_concurrency_read(client: TestClient, test_product):
 async def test_invalid_price(client: TestClient, admin_token):
     product_data = {
         "name": "Invalid Product",
-        "price": -10.0,  # Invalid price
+        "price": -10.0,  
         "stock": 5
     }
     response = client.post(
