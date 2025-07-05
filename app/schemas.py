@@ -3,6 +3,16 @@ from typing import List, Optional
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 
+#回傳正確結果
+class SuccessResponse(BaseModel):
+    success: bool = True
+    message: str
+
+# 批量操作成功
+class BatchDeleteResponse(BaseModel):
+    success: bool = True
+    deleted_count: int
+
 # 簡要模型
 class ProductShort(BaseModel):
     id: int

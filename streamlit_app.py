@@ -138,7 +138,7 @@ def product_filter_page():
         q = st.text_input("搜尋關鍵字", placeholder="輸入產品名稱或描述", help="搜尋名稱或描述")
         limit = st.number_input("每頁顯示", min_value=1, max_value=100, value=10, step=1, help="每頁顯示的產品數")
         offset = st.number_input("偏移量", min_value=0, step=limit, value=0, help="跳過的產品數")
-        order_by = st.selectbox("排序", ["price", "stock", "created_at"], help="選擇排序欄位")
+        order_by = st.selectbox("排序", [ "","price", "stock", "created_at"], help="選擇排序欄位")
         
         if st.button("🔍 查詢", use_container_width=True):
             with st.spinner("正在查詢..."):
@@ -385,8 +385,7 @@ def product_management_page():
                                 st.success("刪除成功！")
                                 time.sleep(1)
                                 st.rerun()
-
-# 供應商管理頁
+                                
 def supplier_management_page():
     st.title("🏢 供應商管理")
     st.markdown("管理供應商資訊或查看供應商詳情", unsafe_allow_html=True)
@@ -427,9 +426,9 @@ def supplier_management_page():
         else:
             st.warning("目前無供應商資料")
 
-        # 操作選擇（僅管理員可執行新增、編輯、刪除）
+        # 操作選擇（根據角色動態設置）
         st.subheader("操作選擇")
-        action_options = ["查看供應商"]
+        action_options = ["查看供應商"]  # 所有角色可查看
         if st.session_state.role == "admin":
             action_options.extend(["新增供應商", "編輯供應商", "刪除供應商"])
         action = st.selectbox("選擇操作", action_options, help="選擇要執行的操作")
@@ -450,7 +449,7 @@ def supplier_management_page():
                         for key, value in supplier.items():
                             if key not in ["id", "name", "contact", "rating", "product"]:
                                 st.markdown(f"**{key}**: {value or '無'}")
-                        if supplier["product"]:
+                        if "product" in supplier and supplier["product"]:
                             st.markdown("**產品清單**")
                             product_df = pd.DataFrame([
                                 {"產品 ID": p["id"], "產品名稱": p["name"]}
@@ -459,6 +458,8 @@ def supplier_management_page():
                             st.dataframe(product_df, use_container_width=True, hide_index=True)
                         else:
                             st.info("此供應商目前無關聯產品")
+                    else:
+                        st.error("查詢失敗，供應商 ID 可能不存在或無權限查看")
 
         elif action == "新增供應商" and st.session_state.role == "admin":
             with st.form(key="supplier_create_form"):
@@ -510,6 +511,8 @@ def supplier_management_page():
                         st.session_state.edit_supplier = supplier
                         st.success("供應商資料已載入")
                         st.rerun()
+                    else:
+                        st.error("載入失敗，供應商 ID 可能不存在或無權限查看")
 
                 supplier = st.session_state.get("edit_supplier", {})
                 if not supplier:
@@ -564,6 +567,8 @@ def supplier_management_page():
                                 st.success("更新成功！")
                                 time.sleep(1)
                                 st.rerun()
+                            else:
+                                st.error("更新失敗，請檢查伺服器回應或權限")
 
         elif action == "刪除供應商" and st.session_state.role == "admin":
             with st.form(key="supplier_delete_form"):
@@ -583,6 +588,8 @@ def supplier_management_page():
                             st.success("刪除成功！")
                             time.sleep(1)
                             st.rerun()
+                        else:
+                            st.error("刪除失敗，請檢查伺服器回應或權限")
                     
 # 歷史記錄頁
 def history_page():
@@ -666,17 +673,17 @@ def history_page():
                     st.plotly_chart(fig, use_container_width=True)
                     st.subheader("庫存歷史記錄")
                     st.dataframe(stock_data[["時間", "舊值", "新值", "變動者", "變動類型"]], use_container_width=True, height=200)
-# 供應商管理頁
+                    
+# 供應商管理頁（統一版本，強化角色控制）
 def supplier_management_page():
-    if st.session_state.role != "admin":
-        st.error("僅管理員可以訪問此頁面！")
-        st.stop()
+    if st.session_state.role == "user" and "view_supplier" not in st.session_state:
+        st.error("一般用戶僅能查看供應商資訊！")
     
     st.title("🏢 供應商管理")
-    st.markdown("管理供應商資訊", unsafe_allow_html=True)
+    st.markdown("管理供應商資訊或查看供應商詳情", unsafe_allow_html=True)
+    
     with st.container(border=True):
         st.subheader("供應商列表")
-        # 分頁控制
         limit = 10
         page = st.number_input("頁碼", min_value=1, value=1, step=1, help="選擇要查看的頁面")
         offset = (page - 1) * limit
@@ -686,24 +693,15 @@ def supplier_management_page():
         total = data.get("total", 0) if data else 0
         
         if suppliers:
-            columns = ["ID", "名稱", "聯絡資訊", "評分", "產品數"]
-            sample_supplier = suppliers[0]
-            extra_columns = [key for key in sample_supplier.keys() if key not in ["id", "name", "contact", "rating", "product"]]
-            columns.extend(extra_columns)
-            
-            df_data = []
-            for s in suppliers:
-                row = {
+            df_data = [
+                {
                     "ID": s["id"],
                     "名稱": s["name"],
                     "聯絡資訊": s["contact"] or "無",
                     "評分": f"{s['rating']:.1f} ⭐" if s["rating"] is not None else "無",
                     "產品數": len(s["product"]) if s["product"] else 0
-                }
-                for col in extra_columns:
-                    row[col] = s.get(col, "無")
-                df_data.append(row)
-            
+                } for s in suppliers
+            ]
             df = pd.DataFrame(df_data)
             st.dataframe(df, use_container_width=True, height=300, hide_index=True)
             st.markdown(f"**總計**: {total} 筆供應商資料，當前第 {page} 頁，共 {max(1, (total + limit - 1) // limit)} 頁")
@@ -711,7 +709,14 @@ def supplier_management_page():
             st.warning("目前無供應商資料")
 
         st.subheader("操作選擇")
-        action = st.selectbox("選擇操作", ["查看供應商", "新增供應商", "編輯供應商", "刪除供應商"], help="選擇要執行的操作")
+        action_options = ["查看供應商"]
+        if st.session_state.role == "admin":
+            action_options.extend(["新增供應商", "編輯供應商", "刪除供應商"])
+        action = st.selectbox("選擇操作", action_options, help="選擇要執行的操作")
+
+        if st.session_state.role != "admin" and action in ["新增供應商", "編輯供應商", "刪除供應商"]:
+            st.error("僅管理員可以執行此操作！")
+            st.stop()
 
         if action == "查看供應商":
             supplier_id = st.number_input("供應商 ID", min_value=1, step=1, help="輸入要查看的供應商 ID")
@@ -726,9 +731,6 @@ def supplier_management_page():
                         st.markdown(f"**聯絡資訊**: {supplier['contact'] or '無'}")
                         st.markdown(f"**評分**: {supplier['rating'] or '無'} ⭐")
                         st.markdown(f"**產品數**: {len(supplier['product'])}")
-                        for key, value in supplier.items():
-                            if key not in ["id", "name", "contact", "rating", "product"]:
-                                st.markdown(f"**{key}**: {value or '無'}")
                         if supplier["product"]:
                             st.markdown("**產品清單**")
                             product_df = pd.DataFrame([
@@ -738,6 +740,8 @@ def supplier_management_page():
                             st.dataframe(product_df, use_container_width=True, hide_index=True)
                         else:
                             st.info("此供應商目前無關聯產品")
+                    else:
+                        st.error("查詢失敗，供應商 ID 可能不存在或無權限查看")
 
         elif action == "新增供應商":
             with st.form(key="supplier_create_form"):
@@ -753,9 +757,9 @@ def supplier_management_page():
                     if rating < 0.1 or rating > 5.0:
                         st.error("評分必須在 0.1-5.0 之間")
                         return
-                    if contact and not re.match(r"([^@]+@[^@]+\.[^@]+|\+\d{10,15})", contact):
-                        st.error("聯絡資訊必須為有效電子郵件或電話格式")
-                        return
+                    # if not validate_contact(contact):
+                    #     st.error("聯絡資訊必須為有效電子郵件或電話格式")
+                    #     return
                     with st.spinner("正在新增..."):
                         data = {
                             "name": name,
@@ -764,16 +768,10 @@ def supplier_management_page():
                         }
                         response = make_api_request("post", f"{BASE_URL}/supplier/", json=data)
                         if response:
-                            #st.write(f"調試：API 回應 = {response.text}")
                             data = handle_response(response)
                             if data and data.get("success", False):
-                                # 嘗試從不同結構提取 ID
                                 supplier_id = data.get("id", data.get("supplier_id", data.get("data", {}).get("id")))
-                                if supplier_id is not None:
-                                    st.success(f"新增成功！自動生成用戶帳號：supplier_{supplier_id}")
-                                else:
-                                    st.warning("新增成功")#，但回應中缺少供應商 ID
-                                time.sleep(1)
+                                st.success(f"新增成功！自動生成用戶帳號：supplier_{supplier_id}", icon="✅")
                                 st.rerun()
                             else:
                                 st.error("新增供應商失敗，請檢查伺服器回應")
@@ -789,7 +787,7 @@ def supplier_management_page():
                     supplier = handle_response(response)
                     if supplier:
                         st.session_state.edit_supplier = supplier
-                        st.success("供應商資料已載入")
+                        st.success("供應商資料已載入", icon="✅")
                         st.rerun()
 
                 supplier = st.session_state.get("edit_supplier", {})
@@ -826,9 +824,9 @@ def supplier_management_page():
                         if rating < 0.1 or rating > 5.0:
                             st.error("評分必須在 0.1-5.0 之間")
                             return
-                        if contact and not re.match(r"([^@]+@[^@]+\.[^@]+|\+\d{10,15})", contact):
-                            st.error("聯絡資訊必須為有效電子郵件或電話格式")
-                            return
+                        # if not validate_contact(contact):
+                        #     st.error("聯絡資訊必須為有效電子郵件或電話格式")
+                        #   return
                         data = {
                             "name": name if name and name != supplier.get("name") else None,
                             "contact": contact if contact and contact != supplier.get("contact") else None,
@@ -842,8 +840,7 @@ def supplier_management_page():
                             response = make_api_request("put", f"{BASE_URL}/supplier/{supplier_id}", json=data)
                             if handle_response(response):
                                 st.session_state.pop("edit_supplier", None)
-                                st.success("更新成功！")
-                                time.sleep(1)
+                                st.success("更新成功！", icon="✅")
                                 st.rerun()
 
         elif action == "刪除供應商":
@@ -861,14 +858,13 @@ def supplier_management_page():
                         elif response and response.status_code == 403:
                             st.error("無權限刪除此供應商")
                         elif handle_response(response):
-                            st.success("刪除成功！")
-                            time.sleep(1)
+                            st.success("刪除成功！", icon="✅")
                             st.rerun()
 
 def batch_operation_page():
-    if st.session_state.role != "admin":
-        st.error("僅管理員可以訪問此頁面！")
-        st.stop()
+    # if st.session_state.role != "admin":
+    #     st.error("僅管理員可以訪問此頁面！")
+    #     st.stop()
     
     st.title("🔄 批量操作")
     st.markdown("批量管理多個產品", unsafe_allow_html=True)
@@ -1082,7 +1078,7 @@ def batch_operation_page():
 # 主邏輯
 if __name__ == "__main__":
     if "access_token" not in st.session_state:
-        login_page()
+        login_page()  # 假設 login_page 已定義
     else:
         with st.sidebar:
             st.title("🛒 產品管理系統")
@@ -1091,11 +1087,11 @@ if __name__ == "__main__":
                 st.session_state.clear()
                 st.rerun()
             
-            pages = ["產品篩選", "供應商管理"]  # 一般使用者可訪問
+            pages = ["產品篩選", "供應商管理"]
             if st.session_state.role in ["admin", "supplier"]:
-                pages.extend(["產品管理", "歷史記錄"])
-            if st.session_state.role == "admin":
-                pages.append("批量操作")  # 僅管理員可訪問
+                pages.extend(["產品管理", "歷史記錄", "批量操作"])
+            # if st.session_state.role == "admin":
+            #     pages.append("批量操作")
             page = st.selectbox("選擇頁面", pages, help="選擇要操作的功能")
 
         if page == "產品篩選":

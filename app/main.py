@@ -5,7 +5,8 @@ from typing import Optional, List
 from fastapi.security import OAuth2PasswordRequestForm
 from schemas import (
     ProductCreate, ProductResponse, ProductUpdate, SupplierResponse, SupplierCreate, SupplierUpdate,
-    ProductFilter, BatchCreateRequest, BatchUpdateRequest, BatchDeleteRequest, HistoryResponse, ProductListResponse, SupplierListResponse
+    ProductFilter, BatchCreateRequest, BatchUpdateRequest, BatchDeleteRequest, HistoryResponse, ProductListResponse, SupplierListResponse,
+    SuccessResponse, BatchDeleteResponse
 )
 from crud import (
     create_product, get_product_by_id, get_product_list, update_product, delete_product,
@@ -14,7 +15,6 @@ from crud import (
     admin_user, admin_supplier, get_current_user
 )
 from datetime import datetime
-from pydantic import BaseModel
 from auth import create_access_token, Token, verify_password, refresh_access_token, create_refresh_token
 from models import User
 
@@ -26,16 +26,6 @@ router = APIRouter()
 # 統一錯誤格式
 def error_response(error_code: str, message: str):
     return {"success": False, "error_code": error_code, "message": message}
-
-# 成功回應
-class SuccessResponse(BaseModel):
-    success: bool = True
-    message: str
-
-# 批量操作成功
-class BatchDeleteResponse(BaseModel):
-    success: bool = True
-    deleted_count: int
 
 @app.get("/current_user")
 async def get_current_user_info(current_user: User = Depends(get_current_user)):
@@ -57,21 +47,17 @@ async def refresh_token(refresh_token: str, db: Session = Depends(get_db)):
 # 產品創建
 @app.post("/product/", response_model=SuccessResponse)
 def create_product_api(product: ProductCreate, db: Session = Depends(get_db), current_user: User = Depends(admin_supplier)):
-    create_product(db, product, current_user)
-    return SuccessResponse(message="產品創建成功")
+    return create_product(db, product, current_user)
 
 # 批量創建
 @app.post("/product/batch_create", response_model=SuccessResponse)
 def batch_create_product_api(request: BatchCreateRequest, db: Session = Depends(get_db), current_user: User = Depends(admin_supplier)):
-    batch_create_product(db, request, current_user)
-    return SuccessResponse(message="批量產品創建成功")
+    return batch_create_product(db, request, current_user)
 
 # 查詢單一產品
 @app.get("/product/{id}", response_model=ProductResponse)
 def read_product(id: int, db: Session = Depends(get_db)):
     product = get_product_by_id(db, id)
-    if not product:
-        raise HTTPException(status_code=404, detail=error_response("PRODUCT_NOT_FOUND", f"產品ID:{id}不存在"))
     return ProductResponse.model_validate(product)
 
 # 查詢產品清單
@@ -114,26 +100,22 @@ def update_product_api(
     db: Session = Depends(get_db),
     current_user: User = Depends(admin_supplier),
 ):
-    update_product(db, id, product, current_user)
-    return SuccessResponse(message="產品更新成功")
+    return update_product(db, id, product, current_user)
 
 # 批量更新
 @app.put("/product/batch_update", response_model=SuccessResponse)
 def batch_update_product_api(request: BatchUpdateRequest, db: Session = Depends(get_db), current_user: User = Depends(admin_user)):
-    batch_update_product(db, request, current_user)
-    return SuccessResponse(message="批量產品更新成功")
+    return batch_update_product(db, request, current_user)
 
 # 刪除產品
 @app.delete("/product/{id}", response_model=SuccessResponse)
 def delete_product_api(id: int, db: Session = Depends(get_db), current_user: User = Depends(admin_supplier)):
-    delete_product(db, id, current_user)
-    return SuccessResponse(message="產品刪除成功")
+    return delete_product(db, id, current_user)
 
 # 批量刪除
 @app.delete("/product/batch_delete", response_model=BatchDeleteResponse)
 def batch_delete_product_api(request: BatchDeleteRequest, db: Session = Depends(get_db), current_user: User = Depends(admin_supplier)):
-    deleted_count = len(batch_delete_product(db, request, current_user))
-    return BatchDeleteResponse(deleted_count=deleted_count)
+    return batch_delete_product(db, request, current_user)
 
 # 查詢歷史記錄
 @app.get("/product/{id}/history", response_model=List[HistoryResponse])
@@ -144,14 +126,12 @@ def get_product_history_api(
     db: Session = Depends(get_db),
     current_user: User = Depends(admin_supplier)
 ):
-    history = get_product_history(db, id, start_date, end_date, current_user)
-    return history
+    return get_product_history(db, id, start_date, end_date, current_user)
 
 # 供應商創建
 @app.post("/supplier/", response_model=SuccessResponse)
 def create_supplier_api(supplier: SupplierCreate, db: Session = Depends(get_db), current_user: User = Depends(admin_user)):
-    create_supplier(db, supplier)
-    return SuccessResponse(message="供應商創建成功")
+    return create_supplier(db, supplier)
 
 # 查詢供應商
 @app.get("/supplier/{id}", response_model=SupplierResponse)
@@ -175,15 +155,22 @@ def list_supplier(
         supplier=[SupplierResponse.model_validate(supplier) for supplier in result["supplier"]],
         total=result["total"]
     )
-
+    
 # 更新供應商
 @app.put("/supplier/{id}", response_model=SuccessResponse)
-def update_supplier_api(id: int, supplier: SupplierUpdate, db: Session = Depends(get_db), current_user: User = Depends(admin_user)):
-    update_supplier(db, id, supplier)
-    return SuccessResponse(message="供應商更新成功")
+def update_supplier_api(
+    id: int,
+    supplier: SupplierUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(admin_user)
+):
+    return update_supplier(db, id, supplier)
 
 # 刪除供應商
 @app.delete("/supplier/{id}", response_model=SuccessResponse)
-def delete_supplier_api(id: int, db: Session = Depends(get_db), current_user: User = Depends(admin_user)):
-    delete_supplier(db, id)
-    return SuccessResponse(message="供應商刪除成功")
+def delete_supplier_api(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(admin_user)
+):
+    return delete_supplier(db, id)

@@ -7,8 +7,8 @@ from database import Base
 product_supplier = Table(
     "product_supplier",
     Base.metadata,
-    Column("product_id", Integer, ForeignKey("product.id"), index=True),
-    Column("supplier_id", Integer, ForeignKey("supplier.id"), index=True)
+    Column("product_id", Integer, ForeignKey("product.id", ondelete="CASCADE"), index=True),
+    Column("supplier_id", Integer, ForeignKey("supplier.id", ondelete="CASCADE"), index=True)
 )
 
 class User(Base):
